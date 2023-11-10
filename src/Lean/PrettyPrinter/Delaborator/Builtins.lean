@@ -41,23 +41,59 @@ def delabBVar : Delab := do
 @[builtin_delab mvar]
 def delabMVar : Delab := do
   let Expr.mvar n ← getExpr | unreachable!
-  let mvarDecl ← n.getDecl
-  let n :=
-    match mvarDecl.userName with
-    | Name.anonymous => n.name.replacePrefix `_uniq `m
-    | n => n
-  `(?$(mkIdent n))
+  match (← get).renumberMetas with
+  -- If not renumbering metas, then just make it a bit easier to read
+  | none =>
+    let mvarDecl ← n.getDecl
+    let n :=
+      match mvarDecl.userName with
+      | Name.anonymous => n.name.replacePrefix `_uniq `m
+      | n => n
+    `(?$(mkIdent n))
+  -- If renumbering metas, check for a fresh number assignment first
+  | some (i, exprMvars, lvlMvars) =>
+    if let some x := exprMvars.find? n.name then
+      `(?$(mkIdent x))
+    else
+      let mvarDecl ← n.getDecl
+      let n' :=
+        match mvarDecl.userName with
+        | Name.anonymous => .num (.str .anonymous "m") i
+        | n => n
+      modify fun st =>
+        { st with renumberMetas := some (i+1, exprMvars.insert n.name n', lvlMvars) }
+      `(?$(mkIdent n'))
+
 
 @[builtin_delab sort]
 def delabSort : Delab := do
   let Expr.sort l ← getExpr | unreachable!
-  match l with
+  match (← renumberLevel l) with
   | Level.zero => `(Prop)
   | Level.succ .zero => `(Type)
   | _ => match l.dec with
     | some l' => `(Type $(Level.quote l' max_prec))
     | none    => `(Sort $(Level.quote l max_prec))
-
+where
+  renumberLevel lvl := do
+    match (← get).renumberMetas with
+    | none => pure lvl
+    | some (i, exprMvars, lvlMvars) =>
+      match lvl with
+      | Level.zero | Level.param .. => pure lvl
+      | Level.succ lvl' => Level.succ <$> renumberLevel lvl'
+      | Level.max lvl1 lvl2 => Level.max <$> renumberLevel lvl1 <*> renumberLevel lvl2
+      | Level.imax lvl1 lvl2 => Level.imax <$> renumberLevel lvl1 <*> renumberLevel lvl2
+      | Level.mvar mv =>
+        if let some x := lvlMvars.find? mv.name then pure (Level.mvar x)
+        else
+          let mv' : LMVarId :=
+            match mv with
+            | ⟨.num p _⟩ => ⟨.num p i⟩
+            | _ => mv
+          modify fun st =>
+            { st with renumberMetas := some (i+1, exprMvars, lvlMvars.insert mv.name mv') }
+          pure (Level.mvar mv')
 
 -- NOTE: not a registered delaborator, as `const` is never called (see [delab] description)
 def delabConst : Delab := do

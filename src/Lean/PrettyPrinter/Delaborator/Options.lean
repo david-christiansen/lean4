@@ -135,6 +135,12 @@ register_builtin_option pp.motives.all : Bool := {
   group    := "pp"
   descr    := "(pretty printer) print all motives"
 }
+register_builtin_option pp.renumberMetas : Bool := {
+  defValue := false
+  group    := "pp"
+  descr    := "(pretty printer) start numbering metas at zero when displaying them"
+}
+
 -- TODO:
 /-
 register_builtin_option g_pp_max_depth : Nat := {
@@ -204,5 +210,6 @@ def getPPMotivesNonConst (o : Options) : Bool := o.get pp.motives.nonConst.name 
 def getPPMotivesAll (o : Options) : Bool := o.get pp.motives.all.name pp.motives.all.defValue
 def getPPInstances (o : Options) : Bool := o.get pp.instances.name pp.instances.defValue
 def getPPInstanceTypes (o : Options) : Bool := o.get pp.instanceTypes.name pp.instanceTypes.defValue
+def getPPRenumberMetas (o : Options) : Bool := o.get pp.renumberMetas.name pp.renumberMetas.defValue
 
 end Lean

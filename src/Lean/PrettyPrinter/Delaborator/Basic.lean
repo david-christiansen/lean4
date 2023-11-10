@@ -48,6 +48,10 @@ structure State where
   infos    : PosMap Info := {}
   /-- See `SubExpr.nextExtraPos`. -/
   holeIter : SubExpr.HoleIterator := {}
+  /-- If metavars are to be renumbered (see option `pp.renumberMetas`), then this is the
+  state with which to do so: the next number to use, and renamings for term and universe
+  metas -/
+  renumberMetas : Option (Nat × NameMap Name × NameMap LMVarId) := none
 
 -- Exceptions from delaborators are not expected. We use an internal exception to signal whether
 -- the delaborator was able to produce a Syntax object.
@@ -81,8 +85,8 @@ instance (priority := low) : MonadWithReaderOf SubExpr DelabM where
 
 instance (priority := low) : MonadStateOf SubExpr.HoleIterator DelabM where
   get         := State.holeIter <$> get
-  set iter    := modify fun ⟨infos, _⟩ => ⟨infos, iter⟩
-  modifyGet f := modifyGet fun ⟨infos, iter⟩ => let (ret, iter') := f iter; (ret, ⟨infos, iter'⟩)
+  set iter    := modify fun ⟨infos, _, renum⟩ => ⟨infos, iter, renum⟩
+  modifyGet f := modifyGet fun ⟨infos, iter, renum⟩ => let (ret, iter') := f iter; (ret, ⟨infos, iter', renum⟩)
 
 -- Macro scopes in the delaborator output are ultimately ignored by the pretty printer,
 -- so give a trivial implementation.
@@ -291,10 +295,15 @@ def delabCore (e : Expr) (optionsPerPos : OptionsPerPos := {}) (delab := Delabor
     catch _ => pure ()
   withOptions (fun _ => opts) do
     let e ← if getPPInstantiateMVars opts then instantiateMVars e else pure e
+
     let optionsPerPos ←
       if !getPPAll opts && getPPAnalyze opts && optionsPerPos.isEmpty then
         topDownAnalyze e
       else pure optionsPerPos
+    let initState :=
+      if Lean.getPPRenumberMetas opts then
+        {renumberMetas := some (0, {}, {}) : Delaborator.State}
+      else { : Delaborator.State}
     let (stx, {infos := infos, ..}) ← catchInternalId Delaborator.delabFailureId
         (delab
           { optionsPerPos := optionsPerPos
@@ -302,7 +311,7 @@ def delabCore (e : Expr) (optionsPerPos : OptionsPerPos := {}) (delab := Delabor
             openDecls := (← getOpenDecls)
             subExpr := SubExpr.mkRoot e
             inPattern := opts.getInPattern }
-          |>.run { : Delaborator.State })
+          |>.run initState)
         (fun _ => unreachable!)
     return (stx, infos)
 
