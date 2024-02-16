@@ -202,8 +202,9 @@ def trailingNode (n : SyntaxNodeKind) (prec lhsPrec : Nat) (p : Parser) : Traili
 
 def mergeOrElseErrors (s : ParserState) (error1 : Error) (iniPos : String.Pos) (mergeErrors : Bool) : ParserState :=
   match s with
-  | ⟨stack, lhsPrec, pos, cache, some error2⟩ =>
-    if pos == iniPos then ⟨stack, lhsPrec, pos, cache, some (if mergeErrors then error1.merge error2 else error2)⟩
+  | ⟨stack, lhsPrec, pos, cache, some error2, errs⟩ =>
+    if pos == iniPos then
+      ⟨stack, lhsPrec, pos, cache, some (if mergeErrors then error1.merge error2 else error2), errs⟩
     else s
   | other => other
 
@@ -284,7 +285,7 @@ instance : OrElse Parser where
 def atomicFn (p : ParserFn) : ParserFn := fun c s =>
   let iniPos := s.pos
   match p c s with
-  | ⟨stack, lhsPrec, _, cache, some msg⟩ => ⟨stack, lhsPrec, iniPos, cache, some msg⟩
+  | ⟨stack, lhsPrec, _, cache, some msg, errs⟩ => ⟨stack, lhsPrec, iniPos, cache, some msg, errs⟩
   | other                       => other
 
 /-- The `atomic(p)` parser parses `p`, returns the same result as `p` and fails iff `p` fails,
@@ -294,6 +295,27 @@ This is important for the `p <|> q` combinator, because it is not backtracking, 
 
 This parser has the same arity as `p` - it produces the same result as `p`. -/
 def atomic : Parser → Parser := withFn atomicFn
+
+/-- Recover from errors in `p` using `recover` to consume input until a known-good state has appeared.
+If `recover` fails itself, then no recovery is performed. -/
+def recoverFn (p : ParserFn) (recover : ParserFn) : ParserFn := fun c s =>
+  let s := p c s
+  if let some msg := s.errorMsg then
+    let s' := recover c {s with errorMsg := none}
+    if s'.hasError then s
+    else {s with
+            pos := s'.pos,
+            lhsPrec := s'.lhsPrec,
+            cache := s'.cache,
+            errorMsg := none,
+            recoveredErrors := s.recoveredErrors.push (s.pos, s.stxStack, msg) }
+  else s
+
+/-- Recover from errors in `p` using `recover` to consume input until a known-good state has appeared.
+If `recover` fails itself, then no recovery is performed. -/
+def recover (parser recover : Parser) : Parser where
+  info := parser.info
+  fn := recoverFn parser.fn recover.fn
 
 def optionalFn (p : ParserFn) : ParserFn := fun c s =>
   let iniSz  := s.stackSize
@@ -955,11 +977,11 @@ private def tokenFnAux : ParserFn := fun c s =>
 private def updateTokenCache (startPos : String.Pos) (s : ParserState) : ParserState :=
   -- do not cache token parsing errors, which are rare and usually fatal and thus not worth an extra field in `TokenCache`
   match s with
-  | ⟨stack, lhsPrec, pos, ⟨_, catCache⟩, none⟩ =>
+  | ⟨stack, lhsPrec, pos, ⟨_, catCache⟩, none, errs⟩ =>
     if stack.size == 0 then s
     else
       let tk := stack.back
-      ⟨stack, lhsPrec, pos, ⟨{ startPos := startPos, stopPos := pos, token := tk }, catCache⟩, none⟩
+      ⟨stack, lhsPrec, pos, ⟨{ startPos := startPos, stopPos := pos, token := tk }, catCache⟩, none, errs⟩
   | other => other
 
 def tokenFn (expected : List String := []) : ParserFn := fun c s =>
@@ -1258,21 +1280,24 @@ def keepTop (s : SyntaxStack) (startStackSize : Nat) : SyntaxStack :=
 
 def keepNewError (s : ParserState) (oldStackSize : Nat) : ParserState :=
   match s with
-  | ⟨stack, lhsPrec, pos, cache, err⟩ => ⟨keepTop stack oldStackSize, lhsPrec, pos, cache, err⟩
+  | ⟨stack, lhsPrec, pos, cache, err, errs⟩ => ⟨keepTop stack oldStackSize, lhsPrec, pos, cache, err, errs⟩
 
 def keepPrevError (s : ParserState) (oldStackSize : Nat) (oldStopPos : String.Pos) (oldError : Option Error) (oldLhsPrec : Nat) : ParserState :=
   match s with
-  | ⟨stack, _, _, cache, _⟩ => ⟨stack.shrink oldStackSize, oldLhsPrec, oldStopPos, cache, oldError⟩
+  | ⟨stack, _, _, cache, _, errs⟩ =>
+    ⟨stack.shrink oldStackSize, oldLhsPrec, oldStopPos, cache, oldError, errs⟩
 
 def mergeErrors (s : ParserState) (oldStackSize : Nat) (oldError : Error) : ParserState :=
   match s with
-  | ⟨stack, lhsPrec, pos, cache, some err⟩ =>
-    ⟨stack.shrink oldStackSize, lhsPrec, pos, cache, if oldError == err then some err else some (oldError.merge err)⟩
+  | ⟨stack, lhsPrec, pos, cache, some err, errs⟩ =>
+    let newError := if oldError == err then err else oldError.merge err
+    ⟨stack.shrink oldStackSize, lhsPrec, pos, cache, some newError, errs⟩
   | other                         => other
 
 def keepLatest (s : ParserState) (startStackSize : Nat) : ParserState :=
   match s with
-  | ⟨stack, lhsPrec, pos, cache, _⟩ => ⟨keepTop stack startStackSize, lhsPrec, pos, cache, none⟩
+  | ⟨stack, lhsPrec, pos, cache, _, errs⟩ =>
+    ⟨keepTop stack startStackSize, lhsPrec, pos, cache, none, errs⟩
 
 def replaceLongest (s : ParserState) (startStackSize : Nat) : ParserState :=
   s.keepLatest startStackSize
