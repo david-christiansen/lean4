@@ -202,6 +202,29 @@ private partial def checkLocalInstanceParameters (type : Expr) : TermElabM Unit 
     throwError "invalid parametric local instance, parameter with type{indentExpr d}\ndoes not have forward dependencies, type class resolution cannot use this kind of local instance because it will not be able to infer a value for this parameter."
   withLocalDecl n bi d fun x => checkLocalInstanceParameters (b.instantiate1 x)
 
+register_builtin_option linter.autoImplicitShadowing : Bool := {
+  defValue := true,
+  descr := "Warn when an explicit binder shadows the name of an automatic implicit"
+}
+
+/--
+Determines whether the name `binderName` shadows an automatic implicit parameter.
+
+If shadowing occurs, then a `MessageData` that refers to the implicit parameter is returned, for use in warnings.
+-/
+private def shadowedAutoImplicit? (binderName : Name) : TermElabM (Option MessageData) := do
+  let lctx ← getLCtx
+  let opts ← getOptions
+  if (opts.getBool `linter.autoImplicitShadowing) then --  || opts.getBool `linter.all then
+    (← read).autoBoundImplicits.findSomeM? fun
+      | e@(.fvar fv) =>
+        if lctx.getRoundtrippingUserName? fv |>.isEqSome binderName then
+          some <$> addMessageContext m!"'{e}'"
+        else pure none
+      | _ => pure none
+  else pure none
+
+
 private partial def elabBinderViews (binderViews : Array BinderView) (fvars : Array (Syntax × Expr)) (k : Array (Syntax × Expr) → TermElabM α)
     : TermElabM α :=
   let rec loop (i : Nat) (fvars : Array (Syntax × Expr)) : TermElabM α := do
@@ -216,8 +239,18 @@ private partial def elabBinderViews (binderViews : Array BinderView) (fvars : Ar
         withRef binderView.type <| checkLocalInstanceParameters type
       let id := binderView.id.getId
       let kind := kindOfBinderName id
+
+      let shadowedAuto : Option MessageData ← shadowedAutoImplicit? id
+
       withLocalDecl id binderView.bi type (kind := kind) fun fvar => do
         addLocalVarInfo binderView.ref fvar
+
+        if let some autoImpl := shadowedAuto then
+          logWarningAt binderView.id <|
+            m!"Shadowed automatic implicit: '{fvar}' has the same name as the automatic implicit {autoImpl}.\n\n" ++
+            m!"Prior occurrences of {autoImpl} refer to a different '{id}'.\n\n"++
+            m!"Use `set_option linter.autoImplicitShadowing false` to disable this check."
+
         loop (i+1) (fvars.push (binderView.id, fvar))
     else
       k fvars
