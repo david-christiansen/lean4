@@ -9,6 +9,7 @@ module
 
 prelude
 public import Init.Data.Slice.Array
+public import Lean.Data.Options
 public import Lean.Data.Position
 public import Lean.Data.OpenDecl
 public import Lean.MetavarContext

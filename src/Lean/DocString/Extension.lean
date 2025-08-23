@@ -7,9 +7,12 @@ module
 
 prelude
 public import Lean.DeclarationRange
+public import Lean.Data.Options
 public import Lean.DocString.Links
 public import Lean.MonadEnv
 public import Init.Data.String.Extra
+public import Lean.DocString.Types
+import Lean.DocString.Markdown
 
 public section
 
@@ -20,8 +23,21 @@ public section
 
 namespace Lean
 
-private builtin_initialize builtinDocStrings : IO.Ref (NameMap String) ← IO.mkRef {}
-builtin_initialize docStringExt : MapDeclarationExtension String ← mkMapDeclarationExtension
+
+inductive DocString where
+  | markdown : String → DocString
+  -- TODO subsections/headers
+  | verso : Array (Doc.Block Empty Empty) → DocString
+deriving Inhabited
+
+register_option doc.verso : Bool := {
+  defValue := false,
+  descr := "whether to use Verso syntax in docstrings"
+  group := "doc"
+}
+
+private builtin_initialize builtinDocStrings : IO.Ref (NameMap DocString) ← IO.mkRef {}
+builtin_initialize docStringExt : MapDeclarationExtension DocString ← mkMapDeclarationExtension
 
 /--
 Adds a builtin docstring to the compiler.
@@ -30,12 +46,12 @@ Links to the Lean manual aren't validated.
 -/
 -- See the test `lean/run/docstringRewrites.lean` for the validation of builtin docstring links
 def addBuiltinDocString (declName : Name) (docString : String) : IO Unit := do
-  builtinDocStrings.modify (·.insert declName docString.removeLeadingSpaces)
+  builtinDocStrings.modify (·.insert declName (.markdown docString.removeLeadingSpaces))
 
 def addDocStringCore [Monad m] [MonadError m] [MonadEnv m] (declName : Name) (docString : String) : m Unit := do
   unless (← getEnv).getModuleIdxFor? declName |>.isNone do
     throwError s!"invalid doc string, declaration '{declName}' is in an imported module"
-  modifyEnv fun env => docStringExt.insert env declName docString.removeLeadingSpaces
+  modifyEnv fun env => docStringExt.insert env declName (.markdown docString.removeLeadingSpaces)
 
 def addDocStringCore' [Monad m] [MonadError m] [MonadEnv m] (declName : Name) (docString? : Option String) : m Unit :=
   match docString? with
@@ -49,11 +65,15 @@ Docstrings to be shown to a user should be looked up with `Lean.findDocString?` 
 -/
 def findSimpleDocString? (env : Environment) (declName : Name) (includeBuiltin := true) : IO (Option String) :=
   if let some docStr := docStringExt.find? env declName then
-    return some docStr
+    return some (toMarkdown docStr)
   else if includeBuiltin then
-    return (← builtinDocStrings.get).find? declName
+    return (← builtinDocStrings.get).find? declName |>.map toMarkdown
   else
     return none
+where
+  toMarkdown : DocString → String
+  | .markdown s => s
+  | .verso bs => Doc.ToMarkdown.toMarkdown (Doc.Block.concat bs) |>.run'
 
 structure ModuleDoc where
   doc : String

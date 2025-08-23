@@ -146,7 +146,8 @@ The end position of the range of `ref` should point at the unknown identifier.
 See also `mkUnknownIdentifierMessage`.
 -/
 def throwUnknownConstantAt [Monad m] [MonadEnv m] [MonadError m] (ref : Syntax) (constName : Name) : m α := do
-  throwUnknownIdentifierAt (declHint := constName) ref m!"Unknown constant `{.ofConstName constName}`"
+  dbgStackTrace fun () =>
+    throwUnknownIdentifierAt (declHint := constName) ref m!"Unknown constant `{.ofConstName constName}`"
 
 /--
 Throw an unknown constant error message.
