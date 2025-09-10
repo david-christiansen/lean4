@@ -513,7 +513,6 @@ where
         mkLambdaFVars #[u] (← mkAppOptM ``liftM #[none, some m, none, none, (← mkAppM declName args)])
       mkAppM ``Bind.bind #[last, k]
 
-
 /-- Environment extension for code suggestions -/
 builtin_initialize codeSuggestionExt : SimpleScopedEnvExtension Name NameSet ←
   registerSimpleScopedEnvExtension {
@@ -538,7 +537,7 @@ builtin_initialize docRoleExt : SimpleScopedEnvExtension (Name × Name) (NameMap
   }
 
 abbrev DocRoleExpander := TSyntaxArray `inline → StateT (Array (TSyntax `doc_arg)) DocM (Inline ElabInline)
-abbrev DocCommandExpander := StateT (Array (TSyntax `doc_arg)) DocM (Inline ElabInline)
+abbrev DocCommandExpander := StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)
 abbrev DocDirectiveExpander := TSyntaxArray `block → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)
 abbrev DocCodeBlockExpander := StrLit → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)
 
@@ -558,7 +557,8 @@ builtin_initialize docCodeBlockExt : SimpleScopedEnvExtension (Name × Name) (Na
 /--
 Built-in docstring code blocks, for bootstrapping.
 -/
-builtin_initialize builtinDocCodeBlocks : IO.Ref (NameMap (Array Name)) ← IO.mkRef {}
+builtin_initialize
+  builtinDocCodeBlocks : IO.Ref (NameMap (Array (Name × DocCodeBlockExpander))) ← IO.mkRef {}
 
 /-- Environment extension for docstring directives -/
 builtin_initialize docDirectiveExt : SimpleScopedEnvExtension (Name × Name) (NameMap (Array Name)) ←
@@ -571,7 +571,8 @@ builtin_initialize docDirectiveExt : SimpleScopedEnvExtension (Name × Name) (Na
 /--
 Built-in docstring directives, for bootstrapping.
 -/
-builtin_initialize builtinDocDirectives : IO.Ref (NameMap (Array Name)) ← IO.mkRef {}
+builtin_initialize
+  builtinDocDirectives : IO.Ref (NameMap (Array (Name × DocDirectiveExpander))) ← IO.mkRef {}
 
 /-- Environment extension for docstring commands -/
 builtin_initialize docCommandExt : SimpleScopedEnvExtension (Name × Name) (NameMap (Array Name)) ←
@@ -584,8 +585,8 @@ builtin_initialize docCommandExt : SimpleScopedEnvExtension (Name × Name) (Name
 /--
 Built-in docstring commands, for bootstrapping.
 -/
-builtin_initialize builtinDocCommands : IO.Ref (NameMap (Array Name)) ← IO.mkRef {}
-
+builtin_initialize
+  builtinDocCommands : IO.Ref (NameMap (Array (Name × DocCommandExpander))) ← IO.mkRef {}
 
 /-- A suggestion about an applicable role -/
 structure CodeSuggestion where
@@ -712,8 +713,8 @@ Adds a builtin documentation code block.
 
 Should be run during initialization.
 -/
-def addBuiltinDocCodeBlock (blockName wrapper : Name) : IO Unit :=
-  builtinDocCodeBlocks.modify (·.alter blockName fun x? => x?.getD #[] |>.push wrapper)
+def addBuiltinDocCodeBlock (blockName wrapper : Name) (impl : DocCodeBlockExpander) : IO Unit :=
+  builtinDocCodeBlocks.modify (·.alter blockName fun x? => x?.getD #[] |>.push (wrapper, impl))
 
 builtin_initialize registerBuiltinAttribute {
   name := `builtin_doc_code_block
@@ -727,7 +728,9 @@ builtin_initialize registerBuiltinAttribute {
         pure decl
     let ret := mkApp2 (.const ``Block [0, 0]) (.const ``ElabInline []) (.const ``ElabBlock [])
     let ((wrapper, _), _) ← genWrapper decl (some (.const ``StrLit [])) ret |>.run {} {} |>.run {} {}
-    declareBuiltin blockName <| mkApp2 (.const ``addBuiltinDocCodeBlock []) (toExpr blockName) (toExpr wrapper)
+    declareBuiltin blockName <|
+      mkApp3 (.const ``addBuiltinDocCodeBlock [])
+        (toExpr blockName) (toExpr wrapper) (.const wrapper [])
 }
 
 /-- A suggestion about an applicable code block -/
@@ -815,8 +818,8 @@ Adds a builtin documentation directive.
 
 Should be run during initialization.
 -/
-def addBuiltinDocDirective (directiveName wrapper : Name) : IO Unit :=
-  builtinDocCodeBlocks.modify (·.alter directiveName fun x? => x?.getD #[] |>.push wrapper)
+def addBuiltinDocDirective (directiveName wrapper : Name) (impl : DocCodeBlockExpander) : IO Unit :=
+  builtinDocCodeBlocks.modify (·.alter directiveName fun x? => x?.getD #[] |>.push (wrapper, impl))
 
 builtin_initialize registerBuiltinAttribute {
   name := `builtin_doc_directive
@@ -857,8 +860,8 @@ Adds a builtin documentation command.
 
 Should be run during initialization.
 -/
-def addBuiltinDocCommand (commandName wrapper : Name) : IO Unit :=
-  builtinDocCommands.modify (·.alter commandName fun x? => x?.getD #[] |>.push wrapper)
+def addBuiltinDocCommand (commandName wrapper : Name) (impl : DocCommandExpander) : IO Unit :=
+  builtinDocCommands.modify (·.alter commandName fun x? => x?.getD #[] |>.push (wrapper, impl))
 
 builtin_initialize registerBuiltinAttribute {
   name := `builtin_doc_command
@@ -917,12 +920,12 @@ private unsafe def codeBlockExpandersForUnsafe (codeBlockName : Ident) : TermEla
   if let some x := x? then
     let names := (docCodeBlockExt.getState (← getEnv)).get? x |>.getD #[]
     let names' := (← builtinDocCodeBlocks.get).get? x |>.getD #[]
-    (names ++ names').mapM (evalConst _)
+    return (← names.mapM (evalConst _)) ++ names'.map (·.2)
   else
     let x := codeBlockName.getId
     let hasBuiltin :=
       (← builtinDocCodeBlocks.get).get? x <|> (← builtinDocCodeBlocks.get).get? (`Lean.Doc ++ x)
-    hasBuiltin.toArray.flatten.mapM (evalConst _)
+    return hasBuiltin.toArray.flatten.map (·.2)
 
 
 @[implemented_by codeBlockExpandersForUnsafe]
@@ -935,12 +938,12 @@ private unsafe def directiveExpandersForUnsafe (directiveName : Ident) : TermEla
   if let some x := x? then
     let names := (docDirectiveExt.getState (← getEnv)).get? x |>.getD #[]
     let names' := (← builtinDocDirectives.get).get? x |>.getD #[]
-    (names ++ names').mapM (evalConst _)
+    return (← names.mapM (evalConst _)) ++ names'.map (·.2)
   else
     let x := directiveName.getId
     let hasBuiltin :=
       (← builtinDocDirectives.get).get? x <|> (← builtinDocDirectives.get).get? (`Lean.Doc ++ x)
-    hasBuiltin.toArray.flatten.mapM (evalConst _)
+    return hasBuiltin.toArray.flatten.map (·.2)
 
 @[implemented_by directiveExpandersForUnsafe]
 private opaque directiveExpandersFor (directiveName : Ident) : TermElabM (Array (TSyntaxArray `block → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)))
@@ -952,12 +955,12 @@ private unsafe def commandExpandersForUnsafe (commandName : Ident) : TermElabM (
   if let some x := x? then
     let names := (docCommandExt.getState (← getEnv)).get? x |>.getD #[]
     let names' := (← builtinDocCommands.get).get? x |>.getD #[]
-    (names ++ names').mapM (evalConst _)
+    return (← names.mapM (evalConst _)) ++ names'.map (·.2)
   else
     let x := commandName.getId
     let hasBuiltin :=
       (← builtinDocCommands.get).get? x <|> (← builtinDocCommands.get).get? (`Lean.Doc ++ x)
-    hasBuiltin.toArray.flatten.mapM (evalConst _)
+    return hasBuiltin.toArray.flatten.map (·.2)
 
 @[implemented_by commandExpandersForUnsafe]
 private opaque commandExpandersFor (commandName : Ident) : TermElabM (Array (StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)))
