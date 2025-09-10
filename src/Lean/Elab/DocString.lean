@@ -30,11 +30,6 @@ builtin_initialize codeSuggestionExt : SimpleScopedEnvExtension Name NameSet ←
     initial := {}
   }
 
-/--
-Built-in code suggestions, for bootstrapping
--/
-builtin_initialize builtinCodeSuggestions : IO.Ref NameSet ← IO.mkRef {}
-
 /-- Environment extension for code block suggestions -/
 builtin_initialize codeBlockSuggestionExt : SimpleScopedEnvExtension Name NameSet ←
   registerSimpleScopedEnvExtension {
@@ -615,12 +610,23 @@ builtin_initialize registerBuiltinAttribute {
 }
 
 /--
+A provider of suggestions for code elements.
+-/
+abbrev CodeSuggester := StrLit → DocM (Array CodeSuggestion)
+
+/--
+Built-in code suggestions, for bootstrapping
+-/
+builtin_initialize
+  builtinCodeSuggestions : IO.Ref (Array (Name × CodeSuggester)) ← IO.mkRef {}
+
+/--
 Adds a builtin documentation code suggestion provider.
 
 Should be run during initialization.
 -/
-def addBuiltinCodeSuggestion (decl : Name) : IO Unit :=
-  builtinCodeSuggestions.modify (·.insert decl)
+def addBuiltinCodeSuggestion (decl : Name) (val : CodeSuggester) : IO Unit :=
+  builtinCodeSuggestions.modify (·.push (decl, val))
 
 builtin_initialize registerBuiltinAttribute {
   name := `builtin_doc_code_suggestions
@@ -631,7 +637,8 @@ builtin_initialize registerBuiltinAttribute {
       if d.type matches (.forallE _ (.const ``StrLit _)
           (.app (.const ``DocM _) (.app (.const ``Array _) (.const ``CodeSuggestion _)))
           .default) then
-        declareBuiltin decl <| .app (.const ``addBuiltinCodeSuggestion []) (toExpr decl)
+        declareBuiltin decl <|
+          mkApp2 (.const ``addBuiltinCodeSuggestion []) (toExpr decl) (.const decl [])
       else
         throwError "Wrong type for {.ofConstName decl}: {indentD <| repr d.type}"
     else
@@ -852,13 +859,12 @@ builtin_initialize registerBuiltinAttribute {
     let ret := mkApp2 (.const ``Block [0, 0]) (.const ``ElabInline []) (.const ``ElabBlock [])
     let ((wrapper, _), _) ← genWrapper decl none ret |>.run {} {} |>.run {} {}
     declareBuiltin commandName <| mkApp2 (.const ``addBuiltinDocCommand []) (toExpr commandName) (toExpr wrapper)
-
 }
 end
 
 private unsafe def codeSuggestionsUnsafe : TermElabM (Array (StrLit → DocM (Array CodeSuggestion))) := do
-  let names := (codeSuggestionExt.getState (← getEnv)) ++ (← builtinCodeSuggestions.get) |>.toArray
-  names.mapM (evalConst _)
+  let names := (codeSuggestionExt.getState (← getEnv)) |>.toArray
+  return (← names.mapM (evalConst _)) ++ (← builtinCodeSuggestions.get).map (·.2)
 
 @[implemented_by codeSuggestionsUnsafe]
 private opaque codeSuggestions : TermElabM (Array (StrLit → DocM (Array CodeSuggestion)))
