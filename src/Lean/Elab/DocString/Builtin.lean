@@ -119,7 +119,7 @@ private def onlyCode (xs : TSyntaxArray `inline) : DocM StrLit := do
 /--
 Displays a name, without attempting to elaborate implicit arguments.
 -/
---@[builtin_doc_role]
+@[builtin_doc_role]
 def name (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
   let s ← onlyCode xs
   let x := s.getString.toName
