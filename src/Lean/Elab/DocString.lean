@@ -720,6 +720,56 @@ builtin_initialize registerBuiltinAttribute {
     declareBuiltin blockName <| mkApp2 (.const ``addBuiltinDocCodeBlock []) (toExpr blockName) (toExpr wrapper)
 }
 
+/-- A suggestion about an applicable code block -/
+structure CodeBlockSuggestion where
+  /-- The name of the code block to suggest. -/
+  name : Name
+  /-- The arguments it should receive, as a string. -/
+  args : Option String := none
+  /-- More information to show users -/
+  moreInfo : Option String := none
+
+
+builtin_initialize registerBuiltinAttribute {
+  name := `doc_code_block_suggestions
+  descr := "docstring code block suggestion provider"
+  applicationTime := .afterCompilation
+  add := fun decl stx kind => do
+    if let some d := (← getEnv).find? decl then
+      if d.type matches (.forallE _ (.const ``StrLit _)
+          (.app (.const ``DocM _) (.app (.const ``Array _) (.const ``CodeBlockSuggestion _)))
+          .default) then
+        codeBlockSuggestionExt.add decl
+      else
+        throwError "Wrong type for {.ofConstName decl}: {indentD <| repr d.type}"
+    else
+      throwError "{.ofConstName decl} is not defined"
+}
+
+/--
+Adds a builtin documentation code suggestion provider.
+
+Should be run during initialization.
+-/
+def addBuiltinCodeBlockSuggestion (decl : Name) : IO Unit :=
+  builtinCodeBlockSuggestions.modify (·.insert decl)
+
+builtin_initialize registerBuiltinAttribute {
+  name := `builtin_doc_code_block_suggestions
+  descr := "builtin docstring code block suggestion provider"
+  applicationTime := .afterCompilation
+  add := fun decl stx kind => do
+    if let some d := (← getEnv).find? decl then
+      if d.type matches (.forallE _ (.const ``StrLit _)
+          (.app (.const ``DocM _) (.app (.const ``Array _) (.const ``CodeBlockSuggestion _)))
+          .default) then
+        declareBuiltin decl <| .app (.const ``addBuiltinCodeBlockSuggestion []) (toExpr decl)
+      else
+        throwError "Wrong type for {.ofConstName decl}: {indentD <| repr d.type}"
+    else
+      throwError "{.ofConstName decl} is not defined"
+}
+
 builtin_initialize registerBuiltinAttribute {
   name := `doc_directive
   descr := "docstring directive expander"
@@ -821,37 +871,75 @@ private unsafe def codeBlockSuggestionsUnsafe : TermElabM (Array (StrLit → Doc
 private opaque codeBlockSuggestions : TermElabM (Array (StrLit → DocM (Array CodeSuggestion)))
 
 
-private unsafe def roleExpandersForUnsafe (roleName : Name) : TermElabM (Array (TSyntaxArray `inline → StateT (Array (TSyntax `doc_arg)) DocM (Inline ElabInline))) := do
-  let names := (docRoleExt.getState (← getEnv)).get? roleName |>.getD #[]
-  let names' := (← builtinDocRoles.get).get? roleName |>.getD #[]
-  (names ++ names').mapM (evalConst _)
+private unsafe def roleExpandersForUnsafe (roleName : Ident) : TermElabM (Array (TSyntaxArray `inline → StateT (Array (TSyntax `doc_arg)) DocM (Inline ElabInline))) := do
+  let x? ←
+    try some <$> realizeGlobalConstNoOverloadWithInfo roleName
+    catch | _ => pure none
+  if let some x := x? then
+    let names := (docRoleExt.getState (← getEnv)).get? x |>.getD #[]
+    let names' := (← builtinDocRoles.get).get? x |>.getD #[]
+    (names ++ names').mapM (evalConst _)
+  else
+    let x := roleName.getId
+    let hasBuiltin :=
+      (← builtinDocRoles.get).get? x <|> (← builtinDocRoles.get).get? (`Lean.Doc ++ x)
+    hasBuiltin.toArray.flatten.mapM (evalConst _)
+
 
 @[implemented_by roleExpandersForUnsafe]
-private opaque roleExpandersFor (roleName : Name) : TermElabM (Array (TSyntaxArray `inline → StateT (Array (TSyntax `doc_arg)) DocM (Inline ElabInline)))
+private opaque roleExpandersFor (roleName : Ident) : TermElabM (Array (TSyntaxArray `inline → StateT (Array (TSyntax `doc_arg)) DocM (Inline ElabInline)))
 
-private unsafe def codeBlockExpandersForUnsafe (roleName : Name) : TermElabM (Array (StrLit → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock))) := do
-  let names := (docCodeBlockExt.getState (← getEnv)).get? roleName |>.getD #[]
-  let names' := (← builtinDocCodeBlocks.get).get? roleName |>.getD #[]
-  (names ++ names').mapM (evalConst _)
+private unsafe def codeBlockExpandersForUnsafe (codeBlockName : Ident) : TermElabM (Array (StrLit → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock))) := do
+  let x? ←
+    try some <$> realizeGlobalConstNoOverloadWithInfo codeBlockName
+    catch | _ => pure none
+  if let some x := x? then
+    let names := (docCodeBlockExt.getState (← getEnv)).get? x |>.getD #[]
+    let names' := (← builtinDocCodeBlocks.get).get? x |>.getD #[]
+    (names ++ names').mapM (evalConst _)
+  else
+    let x := codeBlockName.getId
+    let hasBuiltin :=
+      (← builtinDocCodeBlocks.get).get? x <|> (← builtinDocCodeBlocks.get).get? (`Lean.Doc ++ x)
+    hasBuiltin.toArray.flatten.mapM (evalConst _)
+
 
 @[implemented_by codeBlockExpandersForUnsafe]
-private opaque codeBlockExpandersFor (roleName : Name) : TermElabM (Array (StrLit → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)))
+private opaque codeBlockExpandersFor (codeBlockName : Ident) : TermElabM (Array (StrLit → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)))
 
-private unsafe def directiveExpandersForUnsafe (roleName : Name) : TermElabM (Array (TSyntaxArray `block → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock))) := do
-  let names := (docCodeBlockExt.getState (← getEnv)).get? roleName |>.getD #[]
-  let names' := (← builtinDocCodeBlocks.get).get? roleName |>.getD #[]
-  (names ++ names').mapM (evalConst _)
+private unsafe def directiveExpandersForUnsafe (directiveName : Ident) : TermElabM (Array (TSyntaxArray `block → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock))) := do
+  let x? ←
+    try some <$> realizeGlobalConstNoOverloadWithInfo directiveName
+    catch | _ => pure none
+  if let some x := x? then
+    let names := (docDirectiveExt.getState (← getEnv)).get? x |>.getD #[]
+    let names' := (← builtinDocDirectives.get).get? x |>.getD #[]
+    (names ++ names').mapM (evalConst _)
+  else
+    let x := directiveName.getId
+    let hasBuiltin :=
+      (← builtinDocDirectives.get).get? x <|> (← builtinDocDirectives.get).get? (`Lean.Doc ++ x)
+    hasBuiltin.toArray.flatten.mapM (evalConst _)
 
 @[implemented_by directiveExpandersForUnsafe]
-private opaque directiveExpandersFor (roleName : Name) : TermElabM (Array (TSyntaxArray `block → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)))
+private opaque directiveExpandersFor (directiveName : Ident) : TermElabM (Array (TSyntaxArray `block → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)))
 
-private unsafe def commandExpandersForUnsafe (roleName : Name) : TermElabM (Array (StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock))) := do
-  let names := (docCommandExt.getState (← getEnv)).get? roleName |>.getD #[]
-  let names' := (← builtinDocCommands.get).get? roleName |>.getD #[]
-  (names ++ names').mapM (evalConst _)
+private unsafe def commandExpandersForUnsafe (commandName : Ident) : TermElabM (Array (StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock))) := do
+  let x? ←
+    try some <$> realizeGlobalConstNoOverloadWithInfo commandName
+    catch | _ => pure none
+  if let some x := x? then
+    let names := (docCommandExt.getState (← getEnv)).get? x |>.getD #[]
+    let names' := (← builtinDocCommands.get).get? x |>.getD #[]
+    (names ++ names').mapM (evalConst _)
+  else
+    let x := commandName.getId
+    let hasBuiltin :=
+      (← builtinDocCommands.get).get? x <|> (← builtinDocCommands.get).get? (`Lean.Doc ++ x)
+    hasBuiltin.toArray.flatten.mapM (evalConst _)
 
 @[implemented_by commandExpandersForUnsafe]
-private opaque commandExpandersFor (roleName : Name) : TermElabM (Array (StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)))
+private opaque commandExpandersFor (commandName : Ident) : TermElabM (Array (StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock)))
 
 
 private def mkArgVal (arg : TSyntax `arg_val) : DocM Term :=
@@ -890,6 +978,31 @@ register_builtin_option doc.verso.suggestions : Bool := {
   descr := "whether to provide suggestions for code elements"
   group := "doc"
 }
+
+-- Normally, name suggestions should be provided relative to the current scope. But
+-- during bootstrapping, the names in question may not yet be defined, so builtin
+-- names need special handling.
+private def suggestionName (name : Name) : TermElabM Name := do
+  try unresolveNameGlobalAvoidingLocals name
+  catch
+    | e =>
+      let name' ←
+        if (← builtinDocRoles.get).contains name then pure (some name)
+        else if (← builtinDocCodeBlocks.get).contains name then pure (some name)
+        else pure none
+      match name' with
+        | some (.str _ s) => return .str .anonymous s
+        | some n => return n
+        | none => throw e
+
+private def sortSuggestions (ss : Array Meta.Hint.Suggestion) : Array Meta.Hint.Suggestion :=
+  let cmp : (x y : Meta.Tactic.TryThis.SuggestionText) → Bool
+    | .string s1, .string s2 => s1 < s2
+    | .string _, _ => true
+    | .tsyntax _, .string _ => false
+    | .tsyntax s1, .tsyntax s2 => toString s1.raw < toString s2.raw
+  ss.qsort (cmp ·.suggestion ·.suggestion)
+
 
 /--
 Elaborates the syntax of an inline document element to an actual inline document element.
@@ -930,7 +1043,7 @@ public partial def elabInline (stx : TSyntax `inline) : DocM (Inline ElabInline)
           let ss : Array Meta.Hint.Suggestion ← suggestions.mapM fun {role, args, moreInfo} => do
             pure {
               suggestion :=
-                "{" ++ (← unresolveNameGlobalAvoidingLocals role).toString ++
+                "{" ++ (← suggestionName role).toString ++
                 (args.map (" " ++ ·)).getD "" ++ "}" ++ str,
               postInfo? := moreInfo.map withSpace
             }
@@ -943,8 +1056,7 @@ public partial def elabInline (stx : TSyntax `inline) : DocM (Inline ElabInline)
   | `(inline|\displaymath code($s)) =>
     return .math .display s.getString
   | `(inline|role{$name $args*}[$inl*]) =>
-    let x ← realizeGlobalConstNoOverloadWithInfo name
-    let expanders ← roleExpandersFor x
+    let expanders ← roleExpandersFor name
     for ex in expanders do
       try
         let res ← ex inl args <&> (·.1)
@@ -958,18 +1070,9 @@ public partial def elabInline (stx : TSyntax `inline) : DocM (Inline ElabInline)
     throwErrorAt name "No expander for `{name}`"
   | other =>
     throwErrorAt other "Unsupported syntax {other}"
-
 where
   withSpace (s : String) : String :=
     if s.startsWith " " then s else " " ++ s
-
-  sortSuggestions (ss : Array Meta.Hint.Suggestion) : Array Meta.Hint.Suggestion :=
-    let cmp : (x y : Meta.Tactic.TryThis.SuggestionText) → Bool
-      | .string s1, .string s2 => s1 < s2
-      | .string _, _ => true
-      | .tsyntax _, .string _ => false
-      | .tsyntax s1, .tsyntax s2 => toString s1.raw < toString s2.raw
-    ss.qsort (cmp ·.suggestion ·.suggestion)
 
 /--
 Elaborates the syntax of an block-level document element to an actual block-level document element.
@@ -1012,8 +1115,7 @@ public partial def elabBlock (stx : TSyntax `block) : DocM (Block ElabInline Ela
           urls := st.urls.insert refStr { content := url.getString, location := ref } }
     return .empty
   | `(block| ::: $name $args* { $content*}) =>
-    let x ← realizeGlobalConstNoOverloadWithInfo name
-    let expanders ← directiveExpandersFor x
+    let expanders ← directiveExpandersFor name
     for ex in expanders do
       try
         let res ← ex content args <&> (·.1)
@@ -1025,9 +1127,31 @@ public partial def elabBlock (stx : TSyntax `block) : DocM (Block ElabInline Ela
           else throw e
         | e => throw e
     throwErrorAt name "No directive expander for `{name}`"
+  | `(block| ```%$opener | $s ```) =>
+    if doc.verso.suggestions.get (← getOptions) then
+      if let some ⟨b, e⟩ := opener.getRange? then
+        let suggesters ← codeBlockSuggestions
+        let mut suggestions := #[]
+        for suggest in suggesters do
+          try suggestions := suggestions ++ (← suggest s)
+          catch | _ => pure ()
+        unless suggestions.isEmpty do
+          let text ← getFileMap
+          let str := text.source.extract b e
+          let ss : Array Meta.Hint.Suggestion ← suggestions.mapM fun {role, args, moreInfo} => do
+            pure {
+              suggestion :=
+                str ++ (← suggestionName role).toString ++
+                (args.map (" " ++ ·)).getD "",
+              preInfo? := moreInfo.map withSpace
+            }
+          let ss : Array Meta.Hint.Suggestion := sortSuggestions ss
+          let hint ← m!"Insert a role to document it:".hint ss (ref? := some stx)
+          logWarning m!"Code element could be marked up.{hint}"
+
+    return .code s.getString
   | `(block| ```$name $args* | $s ```) =>
-    let x ← realizeGlobalConstNoOverloadWithInfo name
-    let expanders ← codeBlockExpandersFor x
+    let expanders ← codeBlockExpandersFor name
     for ex in expanders do
       try
         let res ← ex s args <&> (·.1)
@@ -1040,8 +1164,7 @@ public partial def elabBlock (stx : TSyntax `block) : DocM (Block ElabInline Ela
         | e => throw e
     throwErrorAt name "No code block expander for `{name}`"
   | `(block| command{$name $args*}) =>
-    let x ← realizeGlobalConstNoOverloadWithInfo name
-    let expanders ← commandExpandersFor x
+    let expanders ← commandExpandersFor name
     for ex in expanders do
       try
         let res ← ex args <&> (·.1)
@@ -1054,6 +1177,9 @@ public partial def elabBlock (stx : TSyntax `block) : DocM (Block ElabInline Ela
         | e => throw e
     throwErrorAt name "No document command elaborator for `{name}`"
   | _ => throwUnsupportedSyntax
+where
+  withSpace (s : String) : String :=
+    if s.endsWith " " then s else s ++ " "
 
 private def takeFirst? (xs : Array α) : Option (α × Array α) :=
   if h : xs.size > 0 then
