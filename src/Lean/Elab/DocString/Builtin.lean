@@ -854,7 +854,7 @@ def manual (domain : Ident) (name : String) (content : TSyntaxArray `inline) : D
 /--
 Suggests the `name` role, if applicable.
 -/
---@[builtin_doc_code_suggestions]
+@[builtin_doc_code_suggestions]
 def suggestName (code : StrLit) : DocM (Array CodeSuggestion) := do
   let stx ← parseStrLit identFn code
   try
@@ -869,7 +869,7 @@ def suggestName (code : StrLit) : DocM (Array CodeSuggestion) := do
 /--
 Suggests the `lean` role, if applicable.
 -/
---@[builtin_doc_code_suggestions]
+@[builtin_doc_code_suggestions]
 def suggestLean (code : StrLit) : DocM (Array CodeSuggestion) := do
   let p : ParserFn := whitespace >> termParser.fn
   try
@@ -881,7 +881,7 @@ def suggestLean (code : StrLit) : DocM (Array CodeSuggestion) := do
 /--
 Suggests the `tactic` role, if applicable.
 -/
---@[builtin_doc_code_suggestions]
+@[builtin_doc_code_suggestions]
 def suggestTactic (code : StrLit) : DocM (Array CodeSuggestion) := do
   let asString := code.getString
   let asName := asString.toName
@@ -899,7 +899,7 @@ open Lean.Parser.Term in
 /--
 Suggests the `attr` role, if applicable.
 -/
---@[builtin_doc_code_suggestions]
+@[builtin_doc_code_suggestions]
 def suggestAttr (code : StrLit) : DocM (Array CodeSuggestion) := do
   try
     let stx ← parseStrLit attributes.fn code
@@ -919,7 +919,7 @@ open Lean.Parser.Command in
 /--
 Suggests the `option` role, if applicable.
 -/
---@[builtin_doc_code_suggestions]
+@[builtin_doc_code_suggestions]
 def suggestOption (code : StrLit) : DocM (Array CodeSuggestion) := do
   try
     discard <| parseStrLit Command.«set_option».fn code
@@ -938,7 +938,7 @@ def suggestOption (code : StrLit) : DocM (Array CodeSuggestion) := do
 /--
 Suggests the `kw` role, if applicable.
 -/
---@[builtin_doc_code_suggestions]
+@[builtin_doc_code_suggestions]
 def suggestKw (code : StrLit) : DocM (Array CodeSuggestion) := do
   let atom := code.getString
   let env ← getEnv
@@ -956,7 +956,7 @@ def suggestKw (code : StrLit) : DocM (Array CodeSuggestion) := do
 /--
 Suggests the `syntaxCat` role, if applicable.
 -/
---@[builtin_doc_code_suggestions]
+@[builtin_doc_code_suggestions]
 def suggestCat (code : StrLit) : DocM (Array CodeSuggestion) := do
   let env ← getEnv
   let parsers := Lean.Parser.parserExtension.getState env
@@ -968,7 +968,7 @@ def suggestCat (code : StrLit) : DocM (Array CodeSuggestion) := do
 /--
 Suggests the `syntax` role, if applicable.
 -/
---@[builtin_doc_code_suggestions]
+@[builtin_doc_code_suggestions]
 def suggestSyntax (code : StrLit) : DocM (Array CodeSuggestion) := do
   let env ← getEnv
   let parsers := Lean.Parser.parserExtension.getState env
