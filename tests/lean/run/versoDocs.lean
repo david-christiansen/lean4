@@ -1,38 +1,12 @@
-
 import Lean
 
+/-!
+This test checks that the basic features of Verso docstrings work.
+-/
 
 open Lean Doc Elab Term
 
 set_option doc.verso true
-
-
-
-attribute [doc_role] Lean.Doc.name
-attribute [doc_role] Lean.Doc.kw
-attribute [doc_role] Lean.Doc.kw?
-attribute [doc_role] Lean.Doc.syntaxCat
-attribute [doc_role] Lean.Doc.option
-attribute [doc_role] Lean.Doc.attr
-attribute [doc_role] Lean.Doc.tactic
-attribute [doc_role] Lean.Doc.conv
-attribute [doc_code_block] Lean.Doc.lean
-attribute [doc_code_block] Lean.Doc.output
-attribute [doc_command] Lean.Doc.«open»
-attribute [doc_command] Lean.Doc.«set_option»
-attribute [doc_role] Lean.Doc.given
-attribute [doc_role lean] Lean.Doc.leanTerm
-attribute [doc_role] Lean.Doc.manual
-attribute [doc_role] Lean.Doc.syntax
-attribute [doc_code_suggestions] Lean.Doc.suggestName
-attribute [doc_code_suggestions] Lean.Doc.suggestLean
-attribute [doc_code_suggestions] Lean.Doc.suggestTactic
-attribute [doc_code_suggestions] Lean.Doc.suggestAttr
-attribute [doc_code_suggestions] Lean.Doc.suggestOption
-attribute [doc_code_suggestions] Lean.Doc.suggestKw
-attribute [doc_code_suggestions] Lean.Doc.suggestCat
-attribute [doc_code_suggestions] Lean.Doc.suggestSyntax
-
 
 
 @[doc_code_block]
