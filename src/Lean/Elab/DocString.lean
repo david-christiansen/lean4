@@ -690,7 +690,8 @@ builtin_initialize registerBuiltinAttribute {
         (mkApp3 (.const ``List.cons [0]) (.const ``SyntaxNodeKind []) (toExpr `inline) (.app (.const ``List.nil [0]) (.const ``SyntaxNodeKind [])))
     let ret := .app (.const ``Inline [0]) (.const ``ElabInline [])
     let ((wrapper, _), _) ← genWrapper decl (some argTy) ret |>.run {} {} |>.run {} {}
-    declareBuiltin roleName <| mkApp3 (.const ``addBuiltinDocRole []) (toExpr roleName) (toExpr wrapper) (.const wrapper [])
+    declareBuiltin roleName <|
+      mkApp3 (.const ``addBuiltinDocRole []) (toExpr roleName) (toExpr wrapper) (.const wrapper [])
 }
 
 builtin_initialize registerBuiltinAttribute {
@@ -836,7 +837,9 @@ builtin_initialize registerBuiltinAttribute {
         (mkApp3 (.const ``List.cons [0]) (.const ``SyntaxNodeKind []) (toExpr `block) (.app (.const ``List.nil [0]) (.const ``SyntaxNodeKind [])))
     let ret := mkApp2 (.const ``Block [0, 0]) (.const ``ElabInline []) (.const ``ElabBlock [])
     let ((wrapper, _), _) ← genWrapper decl (some argTy) ret |>.run {} {} |>.run {} {}
-    declareBuiltin directiveName <| mkApp2 (.const ``addBuiltinDocCodeBlock []) (toExpr directiveName) (toExpr wrapper)
+    declareBuiltin directiveName <|
+      mkApp3 (.const ``addBuiltinDocCodeBlock [])
+        (toExpr directiveName) (toExpr wrapper) (.const wrapper [])
 }
 
 builtin_initialize registerBuiltinAttribute {
@@ -876,7 +879,9 @@ builtin_initialize registerBuiltinAttribute {
 
     let ret := mkApp2 (.const ``Block [0, 0]) (.const ``ElabInline []) (.const ``ElabBlock [])
     let ((wrapper, _), _) ← genWrapper decl none ret |>.run {} {} |>.run {} {}
-    declareBuiltin commandName <| mkApp2 (.const ``addBuiltinDocCommand []) (toExpr commandName) (toExpr wrapper)
+    declareBuiltin commandName <|
+      mkApp3 (.const ``addBuiltinDocCommand [])
+        (toExpr commandName) (toExpr wrapper) (.const wrapper [])
 }
 end
 
