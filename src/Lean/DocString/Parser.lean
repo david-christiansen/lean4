@@ -312,7 +312,7 @@ private def orderedListIndicator (type : OrderedListType) : ParserFn :=
     | .parenAfter => chFn ')'
 
 private def blankLine : ParserFn :=
-  nodeFn `blankLine <| atomicFn <| asStringFn <| takeWhileFn (· == ' ') >> nl
+  nodeFn `blankLine <| atomicFn <| asStringFn <| takeWhileFn (· == ' ') >> (nl <|> eoiFn)
 
 private def bullet := atomicFn (go UnorderedListType.all)
 where
