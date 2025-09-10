@@ -1012,17 +1012,23 @@ register_builtin_option doc.verso.suggestions : Bool := {
 -- during bootstrapping, the names in question may not yet be defined, so builtin
 -- names need special handling.
 private def suggestionName (name : Name) : TermElabM Name := do
-  try unresolveNameGlobalAvoidingLocals name
+  try
+    if (← getEnv).contains name then
+      unresolveNameGlobalAvoidingLocals name
+    else
+      builtinFallback
   catch
-    | e =>
-      let name' ←
-        if (← builtinDocRoles.get).contains name then pure (some name)
-        else if (← builtinDocCodeBlocks.get).contains name then pure (some name)
-        else pure none
-      match name' with
-        | some (.str _ s) => return .str .anonymous s
-        | some n => return n
-        | none => throw e
+    | _ => builtinFallback
+where
+  builtinFallback := do
+    let name' ←
+      if (← builtinDocRoles.get).contains name then pure (some name)
+      else if (← builtinDocCodeBlocks.get).contains name then pure (some name)
+      else pure none
+    match name' with
+      | some (.str _ s) => return .str .anonymous s
+      | some n => return n
+      | none => return name
 
 private def sortSuggestions (ss : Array Meta.Hint.Suggestion) : Array Meta.Hint.Suggestion :=
   let cmp : (x y : Meta.Tactic.TryThis.SuggestionText) → Bool
