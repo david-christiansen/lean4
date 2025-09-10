@@ -468,7 +468,6 @@ private def genWrapper (declName : Name) (argType : Option Expr) (retType : Expr
           mkLambdaFVars #[i] (← build 0 argSpec #[] (some i))
       else build 0 argSpec #[] none
     let parserTy ← inferType parser
-    dbg_trace parserTy
     let name ← mkFreshUserName (declName ++ `getArgs)
     let name := declName ++ `getArgs
     addAndCompile <| .defnDecl {
@@ -690,7 +689,7 @@ builtin_initialize registerBuiltinAttribute {
         (mkApp3 (.const ``List.cons [0]) (.const ``SyntaxNodeKind []) (toExpr `inline) (.app (.const ``List.nil [0]) (.const ``SyntaxNodeKind [])))
     let ret := .app (.const ``Inline [0]) (.const ``ElabInline [])
     let ((wrapper, _), _) ← genWrapper decl (some argTy) ret |>.run {} {} |>.run {} {}
-    declareBuiltin roleName <| mkApp2 (.const ``addBuiltinDocRole []) (toExpr roleName) (toExpr wrapper)
+    declareBuiltin roleName <| mkApp3 (.const ``addBuiltinDocRole []) (toExpr roleName) (toExpr wrapper) (.const wrapper [])
 }
 
 builtin_initialize registerBuiltinAttribute {
@@ -908,7 +907,8 @@ private unsafe def roleExpandersForUnsafe (roleName : Ident) : TermElabM (Array 
 
 
 @[implemented_by roleExpandersForUnsafe]
-private opaque roleExpandersFor (roleName : Ident) : TermElabM (Array (TSyntaxArray `inline → StateT (Array (TSyntax `doc_arg)) DocM (Inline ElabInline)))
+private opaque roleExpandersFor (roleName : Ident) :
+  TermElabM (Array (TSyntaxArray `inline → StateT (Array (TSyntax `doc_arg)) DocM (Inline ElabInline)))
 
 private unsafe def codeBlockExpandersForUnsafe (codeBlockName : Ident) : TermElabM (Array (StrLit → StateT (Array (TSyntax `doc_arg)) DocM (Block ElabInline ElabBlock))) := do
   let x? ←
