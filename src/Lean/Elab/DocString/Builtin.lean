@@ -1025,12 +1025,11 @@ def suggestLean (code : StrLit) : DocM (Array CodeSuggestion) := do
   try
     let stx ← parseStrLit leanTermContents code
     -- If elaboration succeeds, suggest
-    withEnableInfoTree false do
-      let ty? ←
-        withoutErrToSorry <|
-        if stx[1][1].isMissing then pure none
-        else some <$> elabType stx[1][1]
-      discard <| withoutErrToSorry <| elabTerm stx[0] ty?
+    let ty? ←
+      withoutErrToSorry <|
+      if stx[1][1].isMissing then pure none
+      else some <$> elabType stx[1][1]
+    discard <| withoutErrToSorry <| elabTerm stx[0] ty?
     return #[.mk ``lean none none]
   catch | _ => return #[]
 

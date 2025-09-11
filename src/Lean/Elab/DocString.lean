@@ -1070,7 +1070,7 @@ public partial def elabInline (stx : TSyntax `inline) : DocM (Inline ElabInline)
         let suggesters ← codeSuggestions
         let mut suggestions := #[]
         for suggest in suggesters do
-          try suggestions := suggestions ++ (← suggest s)
+          try suggestions := suggestions ++ (← withEnableInfoTree false <| suggest s)
           catch | _ => pure ()
         unless suggestions.isEmpty do
           let text ← getFileMap
@@ -1168,7 +1168,7 @@ public partial def elabBlock (stx : TSyntax `block) : DocM (Block ElabInline Ela
         let suggesters ← codeBlockSuggestions
         let mut suggestions := #[]
         for suggest in suggesters do
-          try suggestions := suggestions ++ (← suggest s)
+          try suggestions := suggestions ++ (← withEnableInfoTree false <| suggest s)
           catch | _ => pure ()
         unless suggestions.isEmpty do
           let text ← getFileMap
