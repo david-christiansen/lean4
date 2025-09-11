@@ -608,29 +608,53 @@ def «syntax» (cat : Ident) (xs : TSyntaxArray `inline) : DocM (Inline ElabInli
 /--
 A metavariable to be discussed in the remainder of the docstring.
 
-There are two syntaxes that can be used:
+There are three syntaxes that can be used:
  * `` {given}`x` `` establishes `x`'s type as a metavariable.
+ * `` {given (type := "A")}`x` `` uses `A` as the type for metavariable `x`, but does not show that
+   to readers.
  * `` {given}`x : A`` uses `A` as the type for metavariable `x`.
 -/
 @[builtin_doc_role]
-def given (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
+def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntaxArray `inline) :
+    DocM (Inline ElabInline) := do
   let s ← onlyCode xs
   let p : ParserFn := whitespace >> nodeFn nullKind (identFn >> optionalFn (symbolFn ":" >> termParser.fn))
   let stx ← parseStrLit p s
   let x := stx[0]
-  let ty := stx[1][1]
-  let ty' ←
-    if !ty.isMissing then elabType ty
+  let ty ← do
+    let tyStx := stx[1][1]
+    if tyStx.isMissing then
+      if let some typeStr := type then
+        some <$> parseStrLit (whitespace >> termParser.fn) typeStr
+      else pure none
     else
-      withoutErrToSorry <| Meta.mkFreshExprMVar none
-  let lctx ← do
-    let lctx ← getLCtx
-    let fv ← mkFreshFVarId
-    let lctx := lctx.mkLocalDecl fv x.getId ty'
-    addTermInfo' x (.fvar fv) (lctx? := some lctx) (isBinder := true) (expectedType? := some ty')
-    pure lctx
+      if let some s' := type then
+        logWarningAt s' m!"Ignoring `type` argument because a type was provided"
+      pure tyStx
+  let mut lctx ← getLCtx
+  let ty' ←
+    if let some stx := ty then
+      if typeIsMeta then
+        if let `(term|$x:ident) := stx then
+          let u ← Meta.mkFreshLevelMVar
+          let fv ← mkFreshFVarId
+          let uni := mkSort u
+          let t := .fvar fv
+          lctx := lctx.mkLocalDecl fv x.getId uni
+          addTermInfo' x t (lctx? := some lctx) (isBinder := true) (expectedType? := some uni)
+          pure t
+        else
+          logErrorAt stx "Expected identifier because flag `typeIsMeta` is set"
+          Meta.mkFreshExprMVar none
+      else
+        elabType stx
+    else
+      Meta.mkFreshExprMVar none
+  let fv ← mkFreshFVarId
+  lctx := lctx.mkLocalDecl fv x.getId ty'
+  addTermInfo' x (.fvar fv) (lctx? := some lctx) (isBinder := true) (expectedType? := some ty')
   modify (fun st => { st with lctx })
-  pure .empty
+  return .code s.getString
 
 private def firstToken? (stx : Syntax) : Option Syntax :=
   stx.find? fun
