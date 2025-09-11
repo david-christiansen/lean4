@@ -644,7 +644,7 @@ def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntax
           addTermInfo' x t (lctx? := some lctx) (isBinder := true) (expectedType? := some uni)
           pure t
         else
-          logErrorAt stx "Expected identifier because flag `typeIsMeta` is set, but got {stx}"
+          logErrorAt stx m!"Expected identifier because flag `typeIsMeta` is set, but got {stx}"
           Meta.mkFreshExprMVar none
       else
         elabType stx
