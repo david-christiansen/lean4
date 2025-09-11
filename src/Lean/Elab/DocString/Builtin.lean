@@ -141,16 +141,21 @@ def name (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
   let x ← realizeGlobalConstNoOverloadWithInfo n
   return .other (.mk ``Data.Const (.mk (Data.Const.mk x))) #[.code s.getString]
 
+private def strLitRange (s : StrLit) : DocM String.Range := do
+  let pos := (s.raw.getPos? (canonicalOnly := true)).get!
+  let endPos := s.raw.getTailPos? true |>.get!
+  return ⟨pos, endPos⟩
+
 private def parseStrLit (p : ParserFn) (s : StrLit) : DocM Syntax := do
   let text ← getFileMap
   let env ← getEnv
-  let endPos := s.raw.getTailPos? true |>.get!
+  let ⟨pos, endPos⟩ ← strLitRange s
   let endPos := if endPos ≤ text.source.endPos then endPos else text.source.endPos
   let ictx :=
     mkInputContext text.source (← getFileName)
       (endPos := endPos) (endPos_valid := by simp only [endPos]; split <;> simp [*])
   -- TODO fallback for non-original syntax
-  let s := (mkParserState text.source).setPos (s.raw.getPos? (canonicalOnly := true)).get!
+  let s := (mkParserState text.source).setPos pos
   let s := p.run ictx { env, options := ← getOptions } (getTokenTable env) s
 
   if !s.allErrors.isEmpty  then
@@ -159,6 +164,65 @@ private def parseStrLit (p : ParserFn) (s : StrLit) : DocM Syntax := do
     pure s.stxStack.back
   else
     throwError ((s.mkError "end of input").toErrorMsg ictx)
+
+private def parseQuotedStrLit (p : ParserFn) (strLit : StrLit) : DocM Syntax := do
+  let text ← getFileMap
+  let env ← getEnv
+  let ⟨pos, _⟩ ← strLitRange strLit
+  let pos ← do
+    let mut pos := pos
+    if text.source.get pos == 'r' then
+      pos := text.source.next pos
+      while text.source.get pos == '#' do
+        pos := text.source.next pos
+    if text.source.get pos == '"' then
+      pure <| text.source.next pos
+    else
+      throwErrorAt strLit "Not a quoted string literal"
+  let str := strLit.getString
+  let ictx := mkInputContext str (← getFileName)
+  let s := mkParserState str
+  let s := p.run ictx { env, options := ← getOptions } (getTokenTable env) s
+
+  if !s.allErrors.isEmpty then
+    let s := { s with
+        pos := reposition text pos str s.pos
+        recoveredErrors := s.recoveredErrors.map fun
+        | (ePos, stk, err) => (reposition text pos str ePos, stk, err)
+        errorMsg := s.errorMsg.map fun (e : Error) =>
+          { e with unexpectedTk := repositionSyntax text pos str e.unexpectedTk }
+      }
+    throwError (s.toErrorMsg ictx)
+  else if ictx.atEnd s.pos then
+    pure s.stxStack.back
+  else
+    throwError ((s.mkError "end of input").toErrorMsg ictx)
+where
+  reposition (text : FileMap) (posOfStr : String.Pos) (str : String) (posInStr : String.Pos) : String.Pos :=
+    nextn text.source (posIndex str posInStr) posOfStr
+  repositionSyntax (text : FileMap) (posOfStr : String.Pos) (str : String)
+: Syntax → Syntax
+    | .node info k args => .node (repositionInfo text posOfStr str info) k (args.map (repositionSyntax text posOfStr str))
+    | .ident info sub x pre => .ident (repositionInfo text posOfStr str info) sub x pre
+    | .atom info s => .atom (repositionInfo text posOfStr str info) s
+    | .missing => .missing
+  repositionInfo (text : FileMap) (posOfStr : String.Pos) (str : String)
+: SourceInfo → SourceInfo
+    | .original _ pos _ endPos =>
+      .synthetic (reposition text posOfStr str pos) (reposition text posOfStr str endPos) true
+    | .synthetic pos endPos c =>
+      .synthetic (reposition text posOfStr str pos) (reposition text posOfStr str endPos) c
+    | .none => .none
+
+  nextn (str : String) (n : Nat) (p : String.Pos) : String.Pos :=
+    n.fold (init := p) fun _ _ _ => str.next p
+  posIndex (str : String) (p : String.Pos) : Nat := Id.run do
+    let mut p := p
+    let mut n := 0
+    while p > 0 do
+      p := str.prev p
+      n := n + 1
+    return n
 
 private def parseStrLit' (p : ParserFn) (s : StrLit) : DocM (Syntax × Bool) := do
   let text ← getFileMap
@@ -591,6 +655,19 @@ def syntaxCat (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
   else
     return .code (toString c)
 
+private partial def onlyIdent : Syntax → Bool
+  | .node _ _ args =>
+    let nonEmpty := args.filter isEmpty
+    if h : nonEmpty.size = 1 then onlyIdent nonEmpty[0]
+    else false
+  | .ident .. => true
+  | _ => false
+where
+  isEmpty : Syntax → Bool
+  | .node _ _ xs =>
+    xs.size = 0 || xs.all isEmpty
+  | _ => false
+
 /--
 A description of syntax in the provided category.
 -/
@@ -625,7 +702,7 @@ def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntax
     let tyStx := stx[1][1]
     if tyStx.isMissing then
       if let some typeStr := type then
-        some <$> parseStrLit (whitespace >> termParser.fn) typeStr
+        some <$> parseQuotedStrLit (whitespace >> termParser.fn) typeStr
       else pure none
     else
       if let some s' := type then
@@ -876,19 +953,22 @@ def manual (domain : Ident) (name : String) (content : TSyntaxArray `inline) : D
   | .error e => throwError e
 
 /--
-Suggests the `name` role, if applicable.
+Suggests the `name` and `given` roles, if applicable.
 -/
 @[builtin_doc_code_suggestions]
 def suggestName (code : StrLit) : DocM (Array CodeSuggestion) := do
   let stx ← parseStrLit identFn code
+  let mut suggestions := #[]
   try
     discard <| realizeGlobalConstNoOverload stx
-    return #[.mk ``name none none]
+    suggestions := suggestions.push <| .mk ``name none none
   catch
     | _ =>
     if let some (_, []) := (← resolveLocalName stx.getId) then
-      return #[.mk ``name none none]
-  return #[]
+      suggestions := suggestions.push <| .mk ``name none none
+    else
+      suggestions := suggestions.push <| .mk ``given none none
+  return suggestions
 
 /--
 Suggests the `lean` role, if applicable.
@@ -1001,8 +1081,10 @@ def suggestSyntax (code : StrLit) : DocM (Array CodeSuggestion) := do
   let mut candidates := #[]
   for (catName, _) in cats do
     try
-      discard <| parseStrLit (whitespace >> (categoryParser catName 0).fn) code
-      candidates := candidates.push catName
+      let stx ← parseStrLit (whitespace >> (categoryParser catName 0).fn) code
+      -- Many syntax categories admit identifers, so the false postitive rate is high
+      unless onlyIdent stx do
+        candidates := candidates.push catName
     catch | _ => pure ()
 
   candidates.mapM fun cat => do
