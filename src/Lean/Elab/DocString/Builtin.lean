@@ -682,6 +682,13 @@ def «syntax» (cat : Ident) (xs : TSyntaxArray `inline) : DocM (Inline ElabInli
   else
     return .code s.getString
 
+private def givenContents : ParserFn :=
+  whitespace >>
+  nodeFn nullKind
+    (identFn >>
+     optionalFn (symbolFn ":=" >> termParser.fn) >>
+     optionalFn (symbolFn ":" >> termParser.fn))
+
 /--
 A metavariable to be discussed in the remainder of the docstring.
 
@@ -696,13 +703,8 @@ There are four syntaxes that can be used:
 def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntaxArray `inline) :
     DocM (Inline ElabInline) := do
   let s ← onlyCode xs
-  let p : ParserFn :=
-    whitespace >>
-    nodeFn nullKind
-      (identFn >>
-       optionalFn (symbolFn ":=" >> termParser.fn) >>
-       optionalFn (symbolFn ":" >> termParser.fn))
-  let stx ← parseStrLit p s
+
+  let stx ← parseStrLit givenContents s
   let x := stx[0]
   let ty ← do
     let tyStx := stx[2][1]
@@ -991,6 +993,16 @@ def suggestName (code : StrLit) : DocM (Array CodeSuggestion) := do
     else
       suggestions := suggestions.push <| .mk ``given none none
   return suggestions
+
+/--
+Suggests `given` for the syntaxes not covered by `suggestName`.
+-/
+@[builtin_doc_code_suggestions]
+def suggestGiven (code : StrLit) : DocM (Array CodeSuggestion) := do
+  let stx ← parseStrLit givenContents code
+  if stx[1][1].isMissing && stx[2][1].isMissing then
+    return #[]
+  else return #[.mk ``given none none]
 
 /--
 Suggests the `lean` role, if applicable.
