@@ -126,6 +126,7 @@ def DocM.exec (declName : Name) (binders : Syntax) (act : DocM α) :
     TermElabM α := withoutModifyingEnv do
   let some ci := (← getEnv).constants.find? declName
     | throwError "Unknown constant {declName} when building docstring"
+  dbg_trace "Value of {declName} is {ci.value?}"
   let (lctx, localInstances) ← buildContext ci.type binders
   let sc ← scopedEnvExtensionsRef.get
   try
