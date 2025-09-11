@@ -700,7 +700,7 @@ def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntax
     whitespace >>
     nodeFn nullKind
       (identFn >>
-       optionalFn (symbolFn "=" >> termParser.fn) >>
+       optionalFn (symbolFn ":=" >> termParser.fn) >>
        optionalFn (symbolFn ":" >> termParser.fn))
   let stx ← parseStrLit p s
   let x := stx[0]
@@ -746,7 +746,14 @@ def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntax
       lctx.mkLocalDecl fv x.getId ty'
   addTermInfo' x (.fvar fv) (lctx? := some lctx) (isBinder := true) (expectedType? := some ty')
   modify (fun st => { st with lctx })
-  return .code s.getString
+  let text ← getFileMap
+  let outStr :=
+    if let some ⟨b, e⟩ := stx[0].getRange? then
+      if let some ⟨b', e'⟩ := stx[2][1].getRange? then
+        s!"{text.source.extract b e} : {text.source.extract b' e'}"
+      else text.source.extract b e
+    else s.getString
+  return .code outStr
 
 private def firstToken? (stx : Syntax) : Option Syntax :=
   stx.find? fun
