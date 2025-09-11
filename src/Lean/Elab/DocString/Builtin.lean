@@ -689,6 +689,7 @@ private def givenContents : ParserFn :=
      optionalFn (symbolFn ":=" >> termParser.fn) >>
      optionalFn (symbolFn ":" >> termParser.fn))
 
+
 /--
 A metavariable to be discussed in the remainder of the docstring.
 
@@ -912,7 +913,7 @@ where
 
 private def leanTermContents : ParserFn :=
   whitespace >>
-  nodeFn nullKind (termParser.fn >> optionalFn (symbolFn ":" >> termParser.fn))
+  (node nullKind (termParser >> optional (symbol ":" >> termParser))).fn
 
 /--
 Treats the provided term as Lean syntax in the documentation's scope.
