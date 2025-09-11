@@ -959,7 +959,7 @@ def assert (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
       some <$> elabType stx[3][1]
   let lhs ← elabTerm stx[0] ty?
   let rhs ← elabTerm stx[2] ty?
-  unless ← Meta.isDefEq lhs rhs do
+  unless ← Meta.withTransparency .all <| Meta.isDefEq lhs rhs do
     throwErrorAt stx m!"Expected {lhs} = {rhs}, which is {← Meta.whnf lhs} = {← Meta.whnf rhs}, reducing to {← Meta.reduceAll lhs} = {← Meta.reduceAll rhs} but they are not equal."
   pure (.code s.getString)
 
