@@ -194,7 +194,7 @@ private def parseQuotedStrLit (p : ParserFn) (strLit : StrLit) : DocM Syntax := 
       }
     throwError (s.toErrorMsg ictx)
   else if ictx.atEnd s.pos then
-    pure s.stxStack.back
+    pure <| repositionSyntax text pos str s.stxStack.back
   else
     throwError ((s.mkError "end of input").toErrorMsg ictx)
 where
@@ -685,21 +685,27 @@ def «syntax» (cat : Ident) (xs : TSyntaxArray `inline) : DocM (Inline ElabInli
 /--
 A metavariable to be discussed in the remainder of the docstring.
 
-There are three syntaxes that can be used:
+There are four syntaxes that can be used:
  * `` {given}`x` `` establishes `x`'s type as a metavariable.
  * `` {given (type := "A")}`x` `` uses `A` as the type for metavariable `x`, but does not show that
    to readers.
- * `` {given}`x : A`` uses `A` as the type for metavariable `x`.
+ * `` {given}`x : A` `` uses `A` as the type for metavariable `x`.
+ * `` {given}`x = e` `` establishes `x` as an alias for the term `e`
 -/
 @[builtin_doc_role]
 def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntaxArray `inline) :
     DocM (Inline ElabInline) := do
   let s ← onlyCode xs
-  let p : ParserFn := whitespace >> nodeFn nullKind (identFn >> optionalFn (symbolFn ":" >> termParser.fn))
+  let p : ParserFn :=
+    whitespace >>
+    nodeFn nullKind
+      (identFn >>
+       optionalFn (symbolFn "=" >> termParser.fn) >>
+       optionalFn (symbolFn ":" >> termParser.fn))
   let stx ← parseStrLit p s
   let x := stx[0]
   let ty ← do
-    let tyStx := stx[1][1]
+    let tyStx := stx[2][1]
     if tyStx.isMissing then
       if let some typeStr := type then
         some <$> parseQuotedStrLit (whitespace >> termParser.fn) typeStr
@@ -709,14 +715,14 @@ def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntax
         logWarningAt s' m!"Ignoring `type` argument because a type was provided"
       pure tyStx
   let mut lctx ← getLCtx
-  let ty' ←
+  let ty' : Expr ←
     if let some stx := ty then
       if typeIsMeta then
         if let `(term|$x:ident) := stx then
           let u ← Meta.mkFreshLevelMVar
           let fv ← mkFreshFVarId
           let uni := mkSort u
-          let t := .fvar fv
+          let t : Expr := .fvar fv
           let mv ← Meta.mkFreshExprMVar (type? := some uni) (userName := x.getId)
           lctx := lctx.mkLetDecl fv x.getId uni mv
           addTermInfo' x t (lctx? := some lctx) (isBinder := true) (expectedType? := some uni)
@@ -728,8 +734,16 @@ def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntax
         elabType stx
     else
       Meta.mkFreshExprMVar none
+  let val : Option Expr ← do
+    let valStx := stx[1][1]
+    if valStx.isMissing then pure none
+    else some <$> elabTerm valStx (some ty')
   let fv ← mkFreshFVarId
-  lctx := lctx.mkLocalDecl fv x.getId ty'
+  lctx :=
+    if let some v := val then
+      lctx.mkLetDecl fv x.getId ty' v
+    else
+      lctx.mkLocalDecl fv x.getId ty'
   addTermInfo' x (.fvar fv) (lctx? := some lctx) (isBinder := true) (expectedType? := some ty')
   modify (fun st => { st with lctx })
   return .code s.getString
