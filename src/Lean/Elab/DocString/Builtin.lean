@@ -957,9 +957,9 @@ def assert (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
     else -- type after colon
       some <$> elabType stx[3][1]
   let lhs ← elabTerm stx[0] ty?
-  let rhs ← elabTerm stx[1] ty?
+  let rhs ← elabTerm stx[2] ty?
   unless ← Meta.isDefEq lhs rhs do
-    throwErrorAt (mkNullNode #[stx[0], stx[1]]) m!"Expected {lhs} = {rhs}, but they are not equal."
+    throwErrorAt stx m!"Expected {lhs} = {rhs}, but they are not equal."
   pure (.code s.getString)
 
 /--
