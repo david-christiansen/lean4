@@ -698,9 +698,11 @@ There are four syntaxes that can be used:
    to readers.
  * `` {given}`x : A` `` uses `A` as the type for metavariable `x`.
  * `` {given}`x = e` `` establishes `x` as an alias for the term `e`
+
+If the `show` flag is `false` (default `true`), then the metavariable is not shown in the docstring.
 -/
 @[builtin_doc_role]
-def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntaxArray `inline) :
+def given (type : Option StrLit := none) (typeIsMeta : flag false) («show» : flag true) (xs : TSyntaxArray `inline) :
     DocM (Inline ElabInline) := do
   let s ← onlyCode xs
 
@@ -748,14 +750,16 @@ def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntax
       lctx.mkLocalDecl fv x.getId ty'
   addTermInfo' x (.fvar fv) (lctx? := some lctx) (isBinder := true) (expectedType? := some ty')
   modify (fun st => { st with lctx })
-  let text ← getFileMap
-  let outStr :=
-    if let some ⟨b, e⟩ := stx[0].getRange? then
-      if let some ⟨b', e'⟩ := stx[2][1].getRange? then
-        s!"{text.source.extract b e} : {text.source.extract b' e'}"
-      else text.source.extract b e
-    else s.getString
-  return .code outStr
+  if «show» then
+    let text ← getFileMap
+    let outStr :=
+      if let some ⟨b, e⟩ := stx[0].getRange? then
+        if let some ⟨b', e'⟩ := stx[2][1].getRange? then
+          s!"{text.source.extract b e} : {text.source.extract b' e'}"
+        else text.source.extract b e
+      else s.getString
+    return .code outStr
+  else return .empty
 
 private def firstToken? (stx : Syntax) : Option Syntax :=
   stx.find? fun
@@ -906,6 +910,9 @@ where
       (x, s, d.getD target.length)
     withDistance.qsort (fun (_, _, d1) (_, _, d2) => d1 < d2) |>.map fun (x, s, _) => (x, s)
 
+private def leanTermContents : ParserFn :=
+  whitespace >>
+  nodeFn nullKind (termParser.fn >> optionalFn (symbolFn ":" >> termParser.fn))
 
 /--
 Treats the provided term as Lean syntax in the documentation's scope.
@@ -913,9 +920,14 @@ Treats the provided term as Lean syntax in the documentation's scope.
 @[builtin_doc_role lean]
 def leanTerm (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
   let s ← onlyCode xs
-  let p : ParserFn := whitespace >> termParser.fn
-  let stx ← parseStrLit p s
-  discard <| withoutErrToSorry <| elabTerm stx none
+  let stx ← parseStrLit leanTermContents s
+  let ty? ←
+    withoutErrToSorry <|
+    if stx[1][1].isMissing then -- no colon
+      pure none
+    else -- type after colon
+      some <$> elabType stx[1][1]
+  withoutErrToSorry <| discard <| elabTerm stx[0] ty?
   pure (.code s.getString)
 
 /--
@@ -1011,8 +1023,14 @@ Suggests the `lean` role, if applicable.
 def suggestLean (code : StrLit) : DocM (Array CodeSuggestion) := do
   let p : ParserFn := whitespace >> termParser.fn
   try
-    let stx ← parseStrLit p code
-    discard <| withoutErrToSorry <| elabTerm stx none
+    let stx ← parseStrLit leanTermContents code
+    -- If elaboration succeeds, suggest
+    withEnableInfoTree false do
+      let ty? ←
+        withoutErrToSorry <|
+        if stx[1][1].isMissing then pure none
+        else some <$> elabType stx[1][1]
+      discard <| withoutErrToSorry <| elabTerm stx[0] ty?
     return #[.mk ``lean none none]
   catch | _ => return #[]
 
