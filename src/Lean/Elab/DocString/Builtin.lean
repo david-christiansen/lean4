@@ -717,7 +717,8 @@ def given (type : Option StrLit := none) (typeIsMeta : flag false) (xs : TSyntax
           let fv ← mkFreshFVarId
           let uni := mkSort u
           let t := .fvar fv
-          lctx := lctx.mkLocalDecl fv x.getId uni
+          let mv ← Meta.mkFreshExprMVar (type? := some uni) (userName := x.getId)
+          lctx := lctx.mkLetDecl fv x.getId uni mv
           addTermInfo' x t (lctx? := some lctx) (isBinder := true) (expectedType? := some uni)
           pure t
         else
