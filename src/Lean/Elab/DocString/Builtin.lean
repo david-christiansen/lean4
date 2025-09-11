@@ -935,8 +935,8 @@ private def assertContents : ParserFn :=
   whitespace >>
   nodeFn nullKind
     (termParser.fn >>
-     symbolFn "=" >>
-      termParser.fn >>
+     chFn '=' (trailingWs := true) >>
+     termParser.fn >>
      optionalFn (symbolFn ":" >> termParser.fn))
 
 
