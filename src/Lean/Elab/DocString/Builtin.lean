@@ -931,6 +931,37 @@ def leanTerm (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
   withoutErrToSorry <| discard <| elabTerm stx[0] ty?
   pure (.code s.getString)
 
+private def assertContents : ParserFn :=
+  whitespace >>
+  nodeFn nullKind
+    (termParser.fn >>
+     symbolFn "=" >>
+      termParser.fn >>
+     optionalFn (symbolFn ":" >> termParser.fn))
+
+
+/--
+Asserts that an equality holds.
+
+This doesn't use the equality type because it is needed in the prelude, before the = notation is
+introduced.
+-/
+@[builtin_doc_role]
+def assert (xs : TSyntaxArray `inline) : DocM (Inline ElabInline) := do
+  let s ← onlyCode xs
+  let stx ← parseStrLit assertContents s
+  let ty? ←
+    withoutErrToSorry <|
+    if stx[3][1].isMissing then -- no colon
+      pure none
+    else -- type after colon
+      some <$> elabType stx[3][1]
+  let lhs ← elabTerm stx[0] ty?
+  let rhs ← elabTerm stx[1] ty?
+  unless ← Meta.isDefEq lhs rhs do
+    throwErrorAt (mkNullNode #[stx[0], stx[1]]) m!"Expected {lhs} = {rhs}, but they are not equal."
+  pure (.code s.getString)
+
 /--
 Opens a namespace in the remainder of the documentation comment.
 
